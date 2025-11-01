@@ -239,6 +239,22 @@ def generate_travel_story(photos, custom_input):
 
     return result
 
+def save_and_suggest_checklist(destination, duration, mobility, health_focus):
+    """保存行程信息并返回提示信息"""
+    tips = f"""
+    ✅ 已保存行程信息！
+
+    📍 目的地：{destination}
+    ⏰ 时长：{duration}
+    🚶 行动能力：{mobility}
+    ❤️ 健康关注点：{health_focus if isinstance(health_focus, str) else '、'.join(health_focus)}
+
+    ✨ 现在您可以：
+    1. 点击上方"🎁 继续生成清单"按钮直接生成清单
+    2. 或前往"📝 清单与导游服务"页面查看已自动填充的信息
+    """
+    return tips
+
 def create_app():
     """创建Gradio应用"""
     # 兴趣偏好选项
@@ -343,6 +359,16 @@ def create_app():
                             max_lines=30,
                             info="为您量身定制的舒缓行程安排"
                         )
+                        btn3 = gr.Button("🎁 继续生成清单", variant="secondary", size="lg")
+                        output2_hint = gr.HTML(
+                            value="""
+                            <div style="padding:15px; background:#f0f8ff; border-radius:8px; margin-top:10px;">
+                                <p style="color:#4169E1; font-size:14px; margin:0;">
+                                    💡 提示：行程制定完成后，点击上方"🎁 继续生成清单"按钮，可直接为此行程生成专属清单！
+                                </p>
+                            </div>
+                            """
+                        )
 
                 btn1.click(
                     fn=generate_destination_recommendation,
@@ -355,18 +381,34 @@ def create_app():
                     outputs=[output2]
                 )
 
+                # "继续生成清单"按钮：使用当前行程页面的输入直接生成清单
+                btn3.click(
+                    fn=generate_checklist,
+                    inputs=[dest, dur, health_focus],
+                    outputs=[output3]
+                )
+
             # Tab 2: 清单与导游服务
             with gr.Tab("📝 清单与导游服务"):
                 with gr.Row():
                     with gr.Column(scale=1):
+                        gr.HTML('''
+                        <div style="padding:15px; background:#fff3cd; border-radius:8px; margin-bottom:15px;">
+                            <p style="color:#856404; font-size:14px; margin:0;">
+                                💡 小贴士：刚从行程规划页面过来？您的目的地和时长信息已自动填充！如果需要修改，请直接编辑下方输入框。
+                            </p>
+                        </div>
+                        ''')
                         checklist_dest = gr.Textbox(
                             label="📍 目的地",
-                            info="填写目的地"
+                            value="",
+                            info="填写目的地（从行程规划页面过来时将自动填充）"
                         )
                         checklist_dur = gr.Dropdown(
-                            ["3-5天", "一周左右", "10-15天"],
+                            ["3-5天", "一周左右", "10-15天", "15天以上"],
                             label="⏰ 旅行时长",
-                            value="一周左右"
+                            value="一周左右",
+                            info="选择旅行时长"
                         )
                         checklist_needs = gr.Textbox(
                             label="⚕️ 特殊需求",
