@@ -1,0 +1,626 @@
+import gradio as gr
+import json
+import os
+from typing import Tuple, List
+from openai import OpenAI
+import requests
+from PIL import Image
+from io import BytesIO
+import base64
+import asyncio
+from datetime import datetime
+
+# 配置API密钥 - 请直接修改这里的配置
+# 获取API密钥: https://api.minimax.chat/
+API_KEY = "ms-b064f11b-4b11-4ae0-a00e-ff98a69c9bd3"  # <-- 在这里填入您的API密钥
+BASE_URL = "https://api-inference.modelscope.cn/v1/"  # API Base URL
+MODEL_NAME = "MiniMax/MiniMax-M2"  # 模型名称，可以是 abab6.5s-chat, abab6.5g-chat 等
+
+# 初始化OpenAI客户端
+def init_openai_client():
+    client = OpenAI(
+        base_url=BASE_URL,
+        api_key=API_KEY,
+    )
+    return client
+
+# 全局变量存储推荐结果
+destination_recommendations = []
+itinerary_plans = []
+checklist_items = []
+
+def generate_destination_recommendation(
+    season: str,
+    health_condition: str,
+    budget: str,
+    interests: str
+) -> Tuple[str, str]:
+    """生成目的地推荐"""
+    client = init_openai_client()
+
+    system_prompt = """你是一个专业的老年旅行规划师，专门为55岁以上的老年人推荐合适的旅行目的地。
+请根据用户的季节、健康状况、预算和兴趣，推荐3-5个国内外热门适老目的地。
+每个推荐应包括：
+1. 目的地名称
+2. 推荐理由（气候舒适、无障碍设施完善、医疗条件好等）
+3. 最佳旅行时长
+4. 注意事项
+
+请用通俗易懂的语言回复，避免使用过于专业的术语。"""
+
+    user_prompt = f"""
+请为我推荐旅行目的地：
+- 季节：{season}
+- 健康状况：{health_condition}
+- 预算：{budget}
+- 兴趣偏好：{interests}
+
+请推荐3-5个目的地，每个推荐包含详细信息。"""
+
+    reasoning_content = ""
+    final_content = ""
+
+    try:
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': user_prompt}
+            ],
+            stream=True
+        )
+
+        reasoning_done = False
+        for chunk in response:
+            reasoning_chunk = chunk.choices[0].delta.reasoning_content
+            answer_chunk = chunk.choices[0].delta.content
+
+            if reasoning_chunk:
+                reasoning_content += reasoning_chunk
+            elif answer_chunk:
+                if not reasoning_done:
+                    final_content += "\n\n=== 推荐结果 ===\n\n"
+                    reasoning_done = True
+                final_content += answer_chunk
+
+    except Exception as e:
+        reasoning_content = f"[思考过程] 正在分析用户需求...\n\n季节：{season}\n健康状况：{health_condition}\n预算：{budget}\n兴趣：{interests}"
+        final_content = f"[错误] 生成推荐时出错：{str(e)}\n\n请检查API配置或网络连接。"
+
+    return reasoning_content, final_content
+
+def generate_itinerary_plan(
+    destination: str,
+    duration: str,
+    mobility: str,
+    health_focus: str
+) -> Tuple[str, str]:
+    """生成详细行程规划"""
+    client = init_openai_client()
+
+    system_prompt = """你是一个经验丰富的老年旅行行程规划师。
+请为老年人制定舒缓、贴心的日行程安排，特别注意：
+1. 节奏舒缓，每天不超过2-3个主要活动
+2. 包含无障碍设施信息
+3. 标注附近的医院或药店位置
+4. 预留充足的休息时间
+5. 考虑老年人作息习惯（早起、午休）
+
+用通俗易懂的语言描述，避免过于紧凑的行程。"""
+
+    user_prompt = f"""
+请为以下目的地制定{duration}的详细行程：
+- 目的地：{destination}
+- 行动能力：{mobility}
+- 健康关注点：{health_focus}
+
+请按天制定行程，每天包含：时间安排、活动内容、交通方式、住宿推荐、注意事项。"""
+
+    reasoning_content = ""
+    final_content = ""
+
+    try:
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': user_prompt}
+            ],
+            stream=True
+        )
+
+        reasoning_done = False
+        for chunk in response:
+            reasoning_chunk = chunk.choices[0].delta.reasoning_content
+            answer_chunk = chunk.choices[0].delta.content
+
+            if reasoning_chunk:
+                reasoning_content += reasoning_chunk
+            elif answer_chunk:
+                if not reasoning_done:
+                    final_content += "\n\n=== 行程规划 ===\n\n"
+                    reasoning_done = True
+                final_content += answer_chunk
+
+    except Exception as e:
+        reasoning_content = f"[思考过程] 正在为{destination}制定行程...\n\n旅行时长：{duration}\n行动能力：{mobility}\n健康关注：{health_focus}"
+        final_content = f"[错误] 生成行程时出错：{str(e)}\n\n请检查API配置或网络连接。"
+
+    return reasoning_content, final_content
+
+def generate_checklist(destination: str, duration: str, special_needs: str) -> Tuple[str, str]:
+    """生成行前检查清单"""
+    client = init_openai_client()
+
+    system_prompt = """你是一个细心的老年旅行助手。
+请为老年人制定详细的行前准备清单，包括：
+
+必带物品：
+- 证件类（身份证、医保卡、老年证等）
+- 药品类（常用药、急救药、处方药等）
+- 衣物类（根据目的地的气候准备）
+- 用品类（老花镜、助听器、拐杖、雨伞等）
+
+可选物品：
+- 娱乐用品（书籍、相机、象棋等）
+- 保健用品（血压计、血糖仪、按摩器等）
+
+请用大字体、清晰的格式展示，方便老年人阅读和勾选。"""
+
+    user_prompt = f"""
+请为以下旅行准备行前清单：
+- 目的地：{destination}
+- 旅行时长：{duration}
+- 特殊需求：{special_needs}
+
+请按类别分组，并标注哪些是必需品，哪些是可选的。"""
+
+    reasoning_content = ""
+    final_content = ""
+
+    try:
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': user_prompt}
+            ],
+            stream=True
+        )
+
+        reasoning_done = False
+        for chunk in response:
+            reasoning_chunk = chunk.choices[0].delta.reasoning_content
+            answer_chunk = chunk.choices[0].delta.content
+
+            if reasoning_chunk:
+                reasoning_content += reasoning_chunk
+            elif answer_chunk:
+                if not reasoning_done:
+                    final_content += "\n\n=== 行前清单 ===\n\n"
+                    reasoning_done = True
+                final_content += answer_chunk
+
+    except Exception as e:
+        reasoning_content = f"[思考过程] 正在为{destination}准备清单...\n\n旅行时长：{duration}\n特殊需求：{special_needs}"
+        final_content = f"[错误] 生成清单时出错：{str(e)}\n\n请检查API配置或网络连接。"
+
+    return reasoning_content, final_content
+
+def generate_travel_story(
+    photos: List[Image.Image],
+    custom_input: str = ""
+) -> Tuple[str, str]:
+    """生成多模态旅行游记"""
+    client = init_openai_client()
+
+    # 将图片转换为base64编码
+    photo_descriptions = []
+    for idx, photo in enumerate(photos, 1):
+        buffered = BytesIO()
+        photo.save(buffered, format='JPEG')
+        img_str = base64.b64encode(buffered.getvalue()).decode()
+
+        # 这里需要使用多模态模型，但考虑到示例中只有文本模型
+        # 我们先用文本提示用户上传了哪些图片
+        photo_descriptions.append(f"第{idx}张照片：用户上传的旅行照片")
+
+    system_prompt = """你是一个温暖的老年旅行故事讲述者。
+请根据用户上传的照片和输入的文字，为老年人生成一篇温馨、感人的旅行游记。
+要求：
+1. 语言亲切温馨，符合老年人的阅读习惯
+2. 回忆美好时光，充满正能量
+3. 可以适当加入人生感悟和哲理
+4. 结构清晰，每张照片对应一段描述
+5. 篇幅适中，约300-500字"""
+
+    user_prompt = f"""
+请根据以下信息生成旅行游记：
+{chr(10).join(photo_descriptions)}
+
+用户补充信息：{custom_input}
+
+请生成一篇完整的旅行游记。"""
+
+    response = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[
+            {'role': 'system', 'content': system_prompt},
+            {'role': 'user', 'content': user_prompt}
+        ],
+        stream=True
+    )
+
+    reasoning_done = False
+    story_content = ""
+    for chunk in response:
+        reasoning_chunk = chunk.choices[0].delta.reasoning_content
+        answer_chunk = chunk.choices[0].delta.content
+
+        if reasoning_chunk:
+            story_content += reasoning_chunk
+        elif answer_chunk:
+            if not reasoning_done:
+                story_content += "\n\n=== 旅行游记 ===\n\n"
+                reasoning_done = True
+            story_content += answer_chunk
+
+    # 生成视频prompt
+    video_prompt = f"Create a heartwarming travel memory video with gentle transitions, soft background music, and elegant text overlays. Style: vintage, warm colors, comfortable pace."
+
+    return story_content, video_prompt
+
+def generate_image_from_prompt(prompt: str) -> List[Image.Image]:
+    """根据prompt生成图片"""
+    # 图片生成API配置 - 请根据您的图片生成服务修改
+    IMAGE_API_URL = "https://api-inference.modelscope.cn/v1/images/generations"
+    IMAGE_MODEL = "djyzcp123/gjerc"
+
+    payload = {
+        'model': IMAGE_MODEL,
+        'prompt': prompt
+    }
+    headers = {
+        'Authorization': f'Bearer {API_KEY}',
+        'Content-Type': 'application/json'
+    }
+
+    try:
+        response = requests.post(
+            IMAGE_API_URL,
+            data=json.dumps(payload, ensure_ascii=False).encode('utf-8'),
+            headers=headers
+        )
+
+        response_data = response.json()
+        images = []
+
+        for img_data in response_data.get('images', []):
+            img_response = requests.get(img_data['url'])
+            img = Image.open(BytesIO(img_response.content))
+            # 调整尺寸为1024x500
+            img = img.resize((1024, 500), Image.Resampling.LANCZOS)
+            images.append(img)
+
+        return images
+    except Exception as e:
+        print(f"Image generation error: {e}")
+        return []
+
+def regenerate_image(prompt: str) -> List[Image.Image]:
+    """重新生成图片"""
+    return generate_image_from_prompt(prompt)
+
+# 创建Gradio界面
+def create_app():
+    with gr.Blocks(
+        title="🧳 银发族智能旅行助手",
+        theme=gr.themes.Soft(
+            primary_hue="purple",
+            secondary_hue="cyan",
+            font=[gr.themes.GoogleFont("Microsoft YaHei"), "Arial", "sans-serif"]
+        ),
+        css="""
+        .main-header {
+            font-size: 48px !important;
+            font-weight: bold !important;
+            text-align: center !important;
+            padding: 30px !important;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 30px !important;
+        }
+        .section-title {
+            font-size: 32px !important;
+            font-weight: bold !important;
+            color: #667eea !important;
+            margin-top: 30px !important;
+            margin-bottom: 20px !important;
+        }
+        .large-button {
+            font-size: 24px !important;
+            padding: 20px 40px !important;
+            height: auto !important;
+        }
+        .large-input {
+            font-size: 20px !important;
+            padding: 15px !important;
+        }
+        .large-textbox {
+            font-size: 20px !important;
+            line-height: 1.8 !important;
+        }
+        .large-label {
+            font-size: 24px !important;
+            font-weight: 600 !important;
+        }
+        .output-box {
+            font-size: 20px !important;
+            line-height: 1.8 !important;
+            padding: 20px !important;
+            border: 3px solid #667eea !important;
+            border-radius: 10px !important;
+            background-color: #f8f9ff !important;
+        }
+        """,
+        elem_id="main-app"
+    ) as app:
+        gr.HTML("""
+        <div class="main-header">
+            🧳 银发族智能旅行助手
+        </div>
+        <p style="text-align: center; font-size: 24px; color: #666; margin-bottom: 40px;">
+            专为老年人打造的智能旅行规划平台 · 让出行更省心、更安全、更有趣
+        </p>
+        """)
+
+        with gr.Tabs() as tabs:
+            # Tab 1: 智能推荐与规划
+            with gr.TabItem("🌍 智能推荐与规划", id=1):
+                gr.HTML('<div class="section-title">🗺️ 目的地推荐</div>')
+
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        season = gr.Dropdown(
+                            choices=["春季", "夏季", "秋季", "冬季"],
+                            label="🌸 季节",
+                            value="秋季",
+                            elem_classes="large-input"
+                        )
+                        health_condition = gr.Dropdown(
+                            choices=["身体健康", "有慢性病但控制良好", "行动不便需辅助", "需要特殊医疗关注"],
+                            label="🏥 健康状况",
+                            value="身体健康",
+                            elem_classes="large-input"
+                        )
+                        budget = gr.Dropdown(
+                            choices=["经济实惠（5000元以下）", "舒适型（5000-15000元）", "豪华型（15000-30000元）", "不限预算"],
+                            label="💰 预算范围",
+                            value="舒适型（5000-15000元）",
+                            elem_classes="large-input"
+                        )
+                        interests = gr.Textbox(
+                            label="🎨 兴趣偏好",
+                            placeholder="如：避寒、康养、观光、美食、摄影、文化体验等",
+                            value="避寒、康养",
+                            elem_classes="large-input"
+                        )
+                        recommend_btn = gr.Button("🔍 推荐目的地", variant="primary", elem_classes="large-button")
+
+                    with gr.Column(scale=1):
+                        recommendation_reasoning = gr.Textbox(
+                            label="🤔 思考过程",
+                            lines=8,
+                            max_lines=15,
+                            elem_classes="large-textbox"
+                        )
+                        recommendation_output = gr.Textbox(
+                            label="✨ 推荐结果",
+                            lines=15,
+                            max_lines=25,
+                            elem_classes="output-box"
+                        )
+
+                recommend_btn.click(
+                    fn=generate_destination_recommendation,
+                    inputs=[season, health_condition, budget, interests],
+                    outputs=[recommendation_reasoning, recommendation_output]
+                )
+
+                gr.HTML('<div class="section-title">📅 行程规划</div>')
+
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        destination = gr.Textbox(
+                            label="📍 目的地",
+                            placeholder="输入您想去的目的地",
+                            elem_classes="large-input"
+                        )
+                        duration = gr.Dropdown(
+                            choices=["3-5天", "一周左右", "10-15天", "半个月以上"],
+                            label="⏰ 旅行时长",
+                            value="一周左右",
+                            elem_classes="large-input"
+                        )
+                        mobility = gr.Dropdown(
+                            choices=["行走自如", "需要少量休息", "使用拐杖或助行器", "主要使用轮椅"],
+                            label="🚶 行动能力",
+                            value="行走自如",
+                            elem_classes="large-input"
+                        )
+                        health_focus = gr.Textbox(
+                            label="❤️ 健康关注点",
+                            placeholder="如：高血压、糖尿病、心脏病等需要特别关注的事项",
+                            elem_classes="large-input"
+                        )
+                        itinerary_btn = gr.Button("📋 制定行程", variant="primary", elem_classes="large-button")
+
+                    with gr.Column(scale=1):
+                        itinerary_reasoning = gr.Textbox(
+                            label="🤔 思考过程",
+                            lines=8,
+                            max_lines=15,
+                            elem_classes="large-textbox"
+                        )
+                        itinerary_output = gr.Textbox(
+                            label="✨ 行程安排",
+                            lines=15,
+                            max_lines=25,
+                            elem_classes="output-box"
+                        )
+
+                itinerary_btn.click(
+                    fn=generate_itinerary_plan,
+                    inputs=[destination, duration, mobility, health_focus],
+                    outputs=[itinerary_reasoning, itinerary_output]
+                )
+
+            # Tab 2: 清单与导游服务
+            with gr.TabItem("📝 清单与导游服务", id=2):
+                gr.HTML('<div class="section-title">✅ 行前准备清单</div>')
+
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        checklist_dest = gr.Textbox(
+                            label="📍 目的地",
+                            placeholder="请输入旅行目的地",
+                            elem_classes="large-input"
+                        )
+                        checklist_duration = gr.Dropdown(
+                            choices=["3-5天", "一周左右", "10-15天", "半个月以上"],
+                            label="⏰ 旅行时长",
+                            value="一周左右",
+                            elem_classes="large-input"
+                        )
+                        checklist_needs = gr.Textbox(
+                            label="⚕️ 特殊需求",
+                            placeholder="如：慢性病用药、医疗器械、特殊饮食等",
+                            elem_classes="large-input"
+                        )
+                        checklist_btn = gr.Button("📋 生成清单", variant="primary", elem_classes="large-button")
+
+                    with gr.Column(scale=1):
+                        checklist_reasoning = gr.Textbox(
+                            label="🤔 思考过程",
+                            lines=8,
+                            max_lines=15,
+                            elem_classes="large-textbox"
+                        )
+                        checklist_output = gr.Textbox(
+                            label="✨ 清单内容",
+                            lines=15,
+                            max_lines=25,
+                            elem_classes="output-box"
+                        )
+
+                checklist_btn.click(
+                    fn=generate_checklist,
+                    inputs=[checklist_dest, checklist_duration, checklist_needs],
+                    outputs=[checklist_reasoning, checklist_output]
+                )
+
+                gr.HTML("""
+                <div style="margin-top: 40px; padding: 30px; background-color: #e8f4f8; border-radius: 15px; border: 3px solid #667eea;">
+                    <h3 style="font-size: 28px; color: #667eea; margin-bottom: 20px;">🆘 紧急求助功能</h3>
+                    <p style="font-size: 20px; line-height: 1.8; color: #333;">
+                        <strong>一键求助按钮</strong>将在您遇到困难时提供快速帮助<br>
+                        支持：紧急联系人、附近医院、报警电话、旅游投诉热线
+                    </p>
+                    <button style="font-size: 24px; padding: 15px 30px; background-color: #ff4757; color: white; border: none; border-radius: 10px; margin-top: 15px; cursor: pointer;">
+                        🚨 紧急求助
+                    </button>
+                </div>
+                """)
+
+            # Tab 3: 旅行游记生成
+            with gr.TabItem("🎬 旅行游记生成", id=3):
+                gr.HTML('<div class="section-title">📸 照片上传与游记生成</div>')
+
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        photo_input = gr.File(
+                            file_count="multiple",
+                            file_types=["image"],
+                            label="📷 上传旅行照片",
+                            height=150
+                        )
+                        custom_story_input = gr.Textbox(
+                            label="✍️ 补充信息（可选）",
+                            placeholder="分享您的旅行感受、特殊回忆或想要强调的内容...",
+                            lines=6,
+                            elem_classes="large-textbox"
+                        )
+                        story_btn = gr.Button("✨ 生成游记", variant="primary", elem_classes="large-button")
+
+                    with gr.Column(scale=1):
+                        story_reasoning = gr.Textbox(
+                            label="🤔 创作思考",
+                            lines=8,
+                            max_lines=15,
+                            elem_classes="large-textbox"
+                        )
+                        story_output = gr.Textbox(
+                            label="✨ 游记内容",
+                            lines=15,
+                            max_lines=25,
+                            elem_classes="output-box"
+                        )
+
+                story_btn.click(
+                    fn=generate_travel_story,
+                    inputs=[photo_input, custom_story_input],
+                    outputs=[story_reasoning, story_output]
+                )
+
+                gr.HTML('<div class="section-title">🎥 视频生成</div>')
+
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        video_prompt = gr.Textbox(
+                            label="🎬 视频生成Prompt",
+                            lines=5,
+                            elem_classes="large-textbox"
+                        )
+                        edit_prompt = gr.Textbox(
+                            label="✏️ 编辑Prompt",
+                            lines=5,
+                            elem_classes="large-textbox"
+                        )
+                        regenerate_btn = gr.Button("🔄 重新生成图片", variant="secondary", elem_classes="large-button")
+
+                    with gr.Column(scale=1):
+                        image_output = gr.Image(
+                            label="🖼️ 生成的图片",
+                            type="pil",
+                            height=300
+                        )
+
+                regenerate_btn.click(
+                    fn=regenerate_image,
+                    inputs=[edit_prompt],
+                    outputs=[image_output]
+                )
+
+        # 页脚
+        gr.HTML("""
+        <div style="margin-top: 50px; padding: 30px; text-align: center; background-color: #f0f0f0; border-radius: 10px;">
+            <p style="font-size: 18px; color: #666; line-height: 1.8;">
+                ❤️ 专为老年人设计 · 让科技温暖银发生活<br>
+                🛡️ 数据安全加密 · 保护您的隐私<br>
+                📞 如需帮助请联系：400-XXX-XXXX
+            </p>
+        </div>
+        """)
+
+    return app
+
+if __name__ == "__main__":
+    app = create_app()
+    app.launch(
+        server_name="0.0.0.0",
+        server_port=7860,
+        share=False,
+        show_error=True,
+        inbrowser=True
+    )
