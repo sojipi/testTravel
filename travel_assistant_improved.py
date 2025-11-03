@@ -275,81 +275,212 @@ def save_checklist_data(checklist_id, destination, duration, data):
         json.dump(save_data, f, ensure_ascii=False, indent=2)
 
 def format_checklist_output(checklist_id, destination, duration, data):
-    """格式化清单输出为可读文本"""
-    output = f"📋 旅行清单 - {destination} ({duration})\n"
-    output += "=" * 60 + "\n\n"
+    """格式化清单输出为可读文本（带checkbox）"""
+    # 首先尝试加载之前的勾选状态
+    import json
+    import os
+    save_dir = "checklist_data"
+    checked_file = os.path.join(save_dir, f"{checklist_id}_checked.json")
+    checked_items = []
 
-    # 格式化清单
-    output += "📦 行前准备清单：\n"
-    output += "-" * 60 + "\n\n"
+    if os.path.exists(checked_file):
+        try:
+            with open(checked_file, 'r', encoding='utf-8') as f:
+                checked_data = json.load(f)
+                checked_items = checked_data.get("checked", [])
+        except:
+            pass
+
+    # 构建HTML输出
+    html = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 100%;">
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+            <h2 style="margin: 0; font-size: 24px;">📋 旅行清单 - {destination} ({duration})</h2>
+            <p style="margin: 10px 0 0 0; font-size: 14px;">ID: {checklist_id}</p>
+        </div>
+
+        <div style="background: #e8f5e9; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+            <h3 style="margin: 0 0 10px 0; color: #2e7d32;">📦 行前准备清单</h3>
+            <p style="margin: 0; color: #558b2f; font-size: 13px;">💡 提示：勾选框会保存在本地，下次进入时自动恢复勾选状态</p>
+            <div id="progress_bar_{checklist_id}" style="display: none; margin-top: 15px;">
+                <div style="background: #e0e0e0; height: 30px; border-radius: 15px; overflow: hidden;">
+                    <div id="progress_fill_{checklist_id}" style="background: linear-gradient(90deg, #4caf50, #66bb6a); height: 100%; width: 0%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; transition: width 0.3s;">0 / 0 (0%)</div>
+                </div>
+            </div>
+        </div>
+    """
+
+    # 生成每个类别的清单
+    item_counter = 0
     for category in data.get("checklist", []):
         category_name = category.get("category", "")
         items = category.get("items", [])
-        output += f"🔹 {category_name}\n"
+        html += f"""
+        <div style="margin-bottom: 25px; border: 2px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
+            <div style="background: #f5f5f5; padding: 12px 15px; font-weight: bold; font-size: 16px; border-bottom: 1px solid #e0e0e0;">
+                🔹 {category_name}
+            </div>
+            <div style="padding: 15px; background: white;">
+        """
+
         for item in items:
             name = item.get("name", "")
             required = item.get("required", False)
             note = item.get("note", "")
             required_text = "【必带】" if required else "【可选】"
-            output += f"   {required_text} {name}"
-            if note:
-                output += f" - {note}"
-            output += "\n"
-        output += "\n"
+            item_id = f"{checklist_id}_{item_counter}"
 
-    # 格式化预订指引
-    output += "🎫 预订指引：\n"
-    output += "-" * 60 + "\n\n"
+            # 检查是否已勾选
+            is_checked = item_id in checked_items
+            checkbox_checked = 'checked' if is_checked else ''
+
+            html += f"""
+                <div style="display: flex; align-items: flex-start; margin-bottom: 12px; padding: 8px; border-radius: 6px; transition: background 0.2s;" onmouseover="this.style.background='#f9f9f9'" onmouseout="this.style.background='transparent'">
+                    <input type="checkbox" id="{item_id}" {checkbox_checked} onchange="saveCheckStatus('{checklist_id}', '{item_id}', this.checked)" style="width: 20px; height: 20px; margin-right: 12px; margin-top: 2px; cursor: pointer;">
+                    <label for="{item_id}" style="cursor: pointer; flex: 1; {('font-weight: bold;' if required else '') if required_text == '【必带】' else ''}">
+                        <span style="color: {'#d32f2f' if required else '#757575'}; font-size: 12px; font-weight: bold;">{required_text}</span>
+                        <span style="color: #333; margin-left: 8px;">{name}</span>
+                        {f'<br><span style="color: #666; font-size: 13px; margin-left: 33px;">💡 {note}</span>' if note else ''}
+                    </label>
+                </div>
+            """
+            item_counter += 1
+
+        html += """
+            </div>
+        </div>
+        """
+
+    # 预订指引部分（纯文本）
+    html += """
+        <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+            <h3 style="margin: 0 0 10px 0; color: #1565c0;">🎫 预订指引</h3>
+        </div>
+    """
 
     booking_guides = data.get("booking_guides", {})
     if booking_guides:
         # 交通指引
         if "transport" in booking_guides:
-            output += "✈️ 交通预订：\n"
-            output += f"   {booking_guides['transport'].get('guide', '')}\n"
+            html += f"""
+            <div style="margin-bottom: 20px; padding: 15px; border-left: 4px solid #2196f3; background: #f5f5f5;">
+                <h4 style="margin: 0 0 10px 0; color: #1976d2;">✈️ 交通预订</h4>
+                <p style="margin: 0; color: #555; line-height: 1.6;">{booking_guides['transport'].get('guide', '')}</p>
+            """
             platforms = booking_guides['transport'].get('platforms', [])
             if platforms:
-                output += "   推荐平台：\n"
+                html += '<p style="margin: 10px 0 5px 0; color: #333; font-weight: bold;">推荐平台：</p><ul style="margin: 0; color: #555;">'
                 for platform in platforms:
-                    output += f"     • {platform}\n"
-            output += "\n"
+                    html += f'<li style="margin-bottom: 5px;">{platform}</li>'
+                html += '</ul>'
+            html += "</div>"
 
         # 酒店指引
         if "hotel" in booking_guides:
-            output += "🏨 酒店预订：\n"
-            output += f"   {booking_guides['hotel'].get('guide', '')}\n"
+            html += f"""
+            <div style="margin-bottom: 20px; padding: 15px; border-left: 4px solid #4caf50; background: #f5f5f5;">
+                <h4 style="margin: 0 0 10px 0; color: #388e3c;">🏨 酒店预订</h4>
+                <p style="margin: 0; color: #555; line-height: 1.6;">{booking_guides['hotel'].get('guide', '')}</p>
+            """
             platforms = booking_guides['hotel'].get('platforms', [])
             if platforms:
-                output += "   推荐平台：\n"
+                html += '<p style="margin: 10px 0 5px 0; color: #333; font-weight: bold;">推荐平台：</p><ul style="margin: 0; color: #555;">'
                 for platform in platforms:
-                    output += f"     • {platform}\n"
-            output += "\n"
+                    html += f'<li style="margin-bottom: 5px;">{platform}</li>'
+                html += '</ul>'
+            html += "</div>"
 
         # 景点指引
         if "attractions" in booking_guides:
-            output += "🎯 景点预订：\n"
-            output += f"   {booking_guides['attractions'].get('guide', '')}\n"
+            html += f"""
+            <div style="margin-bottom: 20px; padding: 15px; border-left: 4px solid #ff9800; background: #f5f5f5;">
+                <h4 style="margin: 0 0 10px 0; color: #f57c00;">🎯 景点预订</h4>
+                <p style="margin: 0; color: #555; line-height: 1.6;">{booking_guides['attractions'].get('guide', '')}</p>
+            """
             platforms = booking_guides['attractions'].get('platforms', [])
             if platforms:
-                output += "   推荐平台：\n"
+                html += '<p style="margin: 10px 0 5px 0; color: #333; font-weight: bold;">推荐平台：</p><ul style="margin: 0; color: #555;">'
                 for platform in platforms:
-                    output += f"     • {platform}\n"
-            output += "\n"
+                    html += f'<li style="margin-bottom: 5px;">{platform}</li>'
+                html += '</ul>'
+            html += "</div>"
 
     # 温馨提示
     tips = data.get("tips", [])
     if tips:
-        output += "💡 温馨提示：\n"
-        output += "-" * 60 + "\n"
+        html += """
+        <div style="background: #fff3e0; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+            <h3 style="margin: 0 0 10px 0; color: #e65100;">💡 温馨提示</h3>
+        """
         for tip in tips:
-            output += f"   • {tip}\n"
-        output += "\n"
+            html += f'<p style="margin: 8px 0; color: #555;">• {tip}</p>'
+        html += "</div>"
 
-    output += "=" * 60 + "\n"
-    output += f"📝 清单ID：{checklist_id}\n"
-    output += "💾 此清单已自动保存至本地（checklist_data目录）\n"
+    # 底部信息
+    html += f"""
+        <div style="background: #f5f5f5; padding: 15px; border-radius: 8px; text-align: center; color: #666; font-size: 13px; margin-top: 20px;">
+            <p style="margin: 5px 0;">💾 此清单已自动保存至本地（checklist_data目录）</p>
+            <p style="margin: 5px 0; color: #2196f3; font-weight: bold;">勾选状态将自动保存到：checklist_data/{checklist_id}_checked.json</p>
+        </div>
+    </div>
 
-    return output
+    <script>
+        // 从localStorage加载已保存的状态
+        function loadCheckedItems(checklistId) {
+            const checkedItems = JSON.parse(localStorage.getItem('checklist_' + checklistId) || '[]');
+            checkedItems.forEach(function(itemId) {
+                const checkbox = document.getElementById(itemId);
+                if (checkbox) {
+                    checkbox.checked = true;
+                }
+            });
+            updateProgress(checklistId, checkedItems);
+        }
+
+        // 保存checkbox状态到localStorage
+        function saveCheckStatus(checklistId, itemId, isChecked) {
+            let checkedItems = JSON.parse(localStorage.getItem('checklist_' + checklistId) || '[]');
+
+            if (isChecked && checkedItems.indexOf(itemId) === -1) {
+                checkedItems.push(itemId);
+            } else if (!isChecked) {
+                checkedItems = checkedItems.filter(function(id) {
+                    return id !== itemId;
+                });
+            }
+
+            localStorage.setItem('checklist_' + checklistId, JSON.stringify(checkedItems));
+            console.log('已保存勾选状态:', checkedItems);
+
+            updateProgress(checklistId, checkedItems);
+        }
+
+        // 更新进度显示
+        function updateProgress(checklistId, checkedItems) {
+            const totalItems = document.querySelectorAll('input[type="checkbox"]').length;
+            const progressBar = document.getElementById('progress_bar_' + checklistId);
+            const progressFill = document.getElementById('progress_fill_' + checklistId);
+
+            if (progressBar && progressFill && totalItems > 0) {
+                const percentage = Math.round((checkedItems.length / totalItems) * 100);
+
+                // 显示进度条
+                progressBar.style.display = 'block';
+
+                // 更新进度条宽度和文字
+                progressFill.style.width = percentage + '%';
+                progressFill.textContent = checkedItems.length + ' / ' + totalItems + ' (' + percentage + '%)';
+            }
+        }
+
+        // 页面加载时恢复状态
+        document.addEventListener('DOMContentLoaded', function() {
+            loadCheckedItems('{checklist_id}');
+        });
+    </script>
+    """
+
+    return html
 
 def load_checklist_history():
     """加载所有保存的清单历史记录"""
