@@ -5,7 +5,9 @@ This module creates and launches the Gradio application.
 
 import gradio as gr
 import os
-from typing import Optional, Dict, Any
+import tempfile
+import shutil
+from typing import Optional, Dict, Any, List
 
 # Import modules
 try:
@@ -15,12 +17,14 @@ try:
         generate_itinerary_plan,
         generate_checklist
     )
+    from .core.video_editor import create_video_from_images, validate_media_files
     from .ui.components import (
         create_app_theme,
         create_header,
         create_destination_section,
         create_itinerary_section,
         create_checklist_section,
+        create_video_editor_section,
         create_footer,
         create_loading_animation,
         hide_loading_animation
@@ -69,6 +73,7 @@ def create_app() -> gr.Blocks:
         itinerary_state = gr.State("")  # Store itinerary content
         destination_state = gr.State("")  # Store destination for sharing
         duration_state = gr.State("")  # Store duration for sharing
+        video_output_state = gr.State("")  # Store video output path
         
         with gr.Tab("🌟 目的地推荐"):
             destination_section = create_destination_section()
@@ -169,6 +174,79 @@ def create_app() -> gr.Blocks:
             ).then(
                 fn=lambda: hide_loading_animation(),
                 outputs=checklist_section['loading_output']
+            )
+        
+        with gr.Tab("🎬 视频制作"):
+            video_section = create_video_editor_section()
+            
+            # Bind video generation events
+            def generate_video(images, audio, fps, duration_per_image, transition_duration, animation_type):
+                try:
+                    # Validate inputs
+                    if not images:
+                        return "", "请至少上传一张图片", None, ""
+                    
+                    # Convert Gradio File objects to paths
+                    image_paths = [img.name for img in images]
+                    audio_path = audio.name if audio else None
+                    
+                    # Create video
+                    video_path = create_video_from_images(
+                        image_paths,
+                        audio_path,
+                        fps,
+                        duration_per_image,
+                        transition_duration,
+                        animation_type
+                    )
+                    
+                    return "", f"视频生成成功！", video_path, video_path
+                    
+                except Exception as e:
+                    error_msg = f"视频生成失败: {str(e)}"
+                    return "", error_msg, None, ""
+            
+            video_section['button'].click(
+                fn=generate_video,
+                inputs=[
+                    video_section['images_input'],
+                    video_section['audio_input'],
+                    video_section['fps'],
+                    video_section['duration_per_image'],
+                    video_section['transition_duration'],
+                    video_section['animation_type']
+                ],
+                outputs=[
+                    video_section['loading_output'],
+                    video_section['result_message'],
+                    video_section['video_output'],
+                    video_output_state
+                ]
+            )
+            
+            # Bind download event
+            def handle_download(video_path):
+                if not video_path or not os.path.exists(video_path):
+                    return None
+                
+                try:
+                    # Create a temporary file for download
+                    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False, dir=tempfile.gettempdir()) as tmp:
+                        download_path = tmp.name
+                    
+                    # Copy file to ensure permissions are correct
+                    shutil.copy2(video_path, download_path)
+                    
+                    # Return the file object for download
+                    return gr.File(value=download_path, label="旅行视频.mp4")
+                except Exception as e:
+                    print(f"下载视频时出错: {str(e)}")
+                    return None
+            
+            video_section['download_button'].click(
+                fn=handle_download,
+                inputs=[video_output_state],
+                outputs=[gr.File(label="下载视频")]
             )
         
         # Create footer

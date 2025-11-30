@@ -335,6 +335,98 @@ def hide_loading_animation() -> str:
     """
 
 
+def create_video_editor_section() -> Dict[str, Any]:
+    """Create the video editor section."""
+    with gr.Column(scale=1):
+        header = gr.HTML('''
+        <div style="background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%); color: white; padding: 25px; border-radius: 15px; margin-bottom: 20px; text-align: center;">
+            <h2 style="margin: 0; font-size: 32px;">🎬 视频制作</h2>
+            <p style="margin: 10px 0 0 0; font-size: 16px;">将您的旅行照片制作成精美的视频</p>
+        </div>
+        ''')
+        
+        # Image upload section
+        images_input = gr.Files(
+            label="📷 上传图片",
+            file_types=[".jpg", ".jpeg", ".png", ".gif"]
+        )
+        
+        # Audio upload section
+        audio_input = gr.File(
+            label="🎵 上传音频（可选）",
+            file_types=[".mp3", ".wav", ".ogg"]
+        )
+        
+        # Video settings
+        with gr.Row(): 
+            fps = gr.Slider(
+                minimum=10, 
+                maximum=60, 
+                value=24, 
+                step=1,
+                label="🎞️ 帧率 (FPS)"
+            )
+            
+            duration_per_image = gr.Slider(
+                minimum=0.5, 
+                maximum=10.0, 
+                value=3.0, 
+                step=0.1,
+                label="⏱️ 每张图片显示时长 (秒)"
+            )
+        
+        with gr.Row(): 
+            transition_duration = gr.Slider(
+                minimum=0.1, 
+                maximum=2.0, 
+                value=0.5, 
+                step=0.1,
+                label="🔄 转场时长 (秒)"
+            )
+            
+            animation_type = gr.Dropdown(
+                choices=["fade", "zoom", "pan"],
+                value="fade",
+                label="✨ 动画效果"
+            )
+        
+        # Action buttons
+        btn = gr.Button("🎬 生成视频", variant="primary", size="lg")
+        
+        # Loading and output sections
+        loading_output = gr.HTML(value="")
+        
+        result_message = gr.Textbox(
+            label="📝 处理结果",
+            lines=2
+        )
+        
+        # Video output
+        video_output = gr.Video(
+            label="🎥 生成的视频"
+        )
+        
+        # Download button
+        download_button = gr.Button(
+            "💾 下载视频", 
+            variant="secondary", 
+            size="lg"
+        )
+        
+    return {
+        'images_input': images_input,
+        'audio_input': audio_input,
+        'fps': fps,
+        'duration_per_image': duration_per_image,
+        'transition_duration': transition_duration,
+        'animation_type': animation_type,
+        'button': btn,
+        'loading_output': loading_output,
+        'result_message': result_message,
+        'video_output': video_output,
+        'download_button': download_button
+    }
+
 def create_app_theme() -> gr.themes.Soft:
     """Create the application theme."""
     return gr.themes.Soft(primary_hue=THEME_PRIMARY, secondary_hue=THEME_SECONDARY)
